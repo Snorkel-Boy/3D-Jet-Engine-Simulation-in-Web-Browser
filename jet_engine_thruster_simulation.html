@@ -1,0 +1,1090 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jet Engine Thruster CAD Simulation</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- OrbitControls -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <!-- Anime.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.1/anime.min.js"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #212121;
+            font-family: 'Inter', sans-serif;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        #canvas-container {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+            cursor: grab;
+        }
+
+        #canvas-container:active {
+            cursor: grabbing;
+        }
+
+        .mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* Custom Bottom-Right Tick Scrubber (Matching Reference Image) */
+        .scrubber-pill {
+            background: rgba(42, 42, 42, 0.92);
+            backdrop-filter: blur(8px);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            cursor: ew-resize;
+        }
+
+        .tick-line {
+            width: 1.5px;
+            height: 11px;
+            background-color: rgba(255, 255, 255, 0.22);
+            transition: background-color 0.15s ease, height 0.15s ease;
+            pointer-events: none;
+        }
+
+        .tick-line.major {
+            height: 13px;
+            background-color: rgba(255, 255, 255, 0.42);
+        }
+
+        /* Red Indicator Bar */
+        #scrubber-indicator {
+            width: 3.5px;
+            height: 18px;
+            background-color: #ff3b30;
+            border-radius: 2px;
+            box-shadow: 0 0 10px rgba(255, 59, 48, 0.85);
+            position: absolute;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        /* Floating 3D Technical Callout Labels */
+        .callout-label {
+            position: absolute;
+            pointer-events: none;
+            transform: translate(-50%, -100%);
+            transition: opacity 0.25s ease;
+            z-index: 5;
+        }
+
+        .callout-line {
+            width: 1px;
+            height: 28px;
+            background: linear-gradient(to bottom, rgba(255, 160, 122, 0.8), rgba(255, 160, 122, 0.1));
+            margin: 0 auto;
+        }
+
+        .callout-dot {
+            width: 5px;
+            height: 5px;
+            background-color: #ff9e7a;
+            border-radius: 50%;
+            margin: 0 auto;
+            box-shadow: 0 0 6px #ff9e7a;
+        }
+
+        /* Custom Range Slider for Thrust */
+        input[type=range].thrust-slider {
+            -webkit-appearance: none;
+            appearance: none;
+            background: rgba(255,255,255,0.1);
+            height: 6px;
+            border-radius: 999px;
+            outline: none;
+        }
+        input[type=range].thrust-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #ff5722;
+            cursor: pointer;
+            box-shadow: 0 0 10px rgba(255, 87, 34, 0.8);
+            border: 2px solid #fff;
+        }
+    </style>
+</head>
+<body class="text-neutral-200">
+
+    <!-- 3D WebGL Canvas -->
+    <div id="canvas-container"></div>
+
+    <!-- 3D Floating Technical Labels Container -->
+    <div id="labels-container" class="inset-0 pointer-events-none fixed z-10 opacity-0 transition-opacity duration-300"></div>
+
+    <!-- Top-Left Technical HUD -->
+    <div class="fixed top-5 left-5 z-20 flex flex-col gap-3 max-w-xs w-full sm:w-80 pointer-events-none">
+        <div class="bg-neutral-900/80 backdrop-blur-md border border-neutral-800/90 rounded-2xl p-4 shadow-2xl pointer-events-auto">
+            <div class="flex items-center justify-between mb-2">
+                <div class="flex items-center gap-2">
+                    <span id="status-dot" class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+                    <h1 class="text-xs font-bold tracking-widest uppercase mono text-neutral-300">TRB-X9 // CAD SIMULATOR</h1>
+                </div>
+                <span id="rpm-readout" class="text-xs mono text-amber-400/90 font-semibold">1,420 RPM</span>
+            </div>
+            
+            <p class="text-[11px] text-neutral-400 leading-relaxed mb-3">
+                Drag to orbit 3D view. Scroll or drag the bottom-right red gauge to scrub the <span class="text-neutral-200 font-medium">Anime.js</span> assembly timeline.
+            </p>
+
+            <!-- Action Buttons -->
+            <div class="grid grid-cols-2 gap-2 mb-3">
+                <button id="btn-explode" class="px-3 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 active:scale-95 transition-all text-xs font-medium text-neutral-200 border border-neutral-700/70 flex items-center justify-center gap-1.5 shadow-sm">
+                    <svg class="w-3.5 h-3.5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/>
+                    </svg>
+                    <span id="explode-text">Explode View</span>
+                </button>
+
+                <button id="btn-labels" class="px-3 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 active:scale-95 transition-all text-xs font-medium text-neutral-200 border border-neutral-700/70 flex items-center justify-center gap-1.5 shadow-sm">
+                    <svg class="w-3.5 h-3.5 text-neutral-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/>
+                    </svg>
+                    <span>Callouts</span>
+                </button>
+            </div>
+
+            <!-- Thruster Afterburner / Throttle Control -->
+            <div class="pt-2 border-t border-neutral-800">
+                <div class="flex justify-between items-center text-[11px] mono mb-1.5">
+                    <span class="text-neutral-400">THRUST / AFTERBURNER</span>
+                    <span id="thrust-val" class="text-orange-400 font-semibold">15%</span>
+                </div>
+                <div class="flex items-center gap-2.5">
+                    <input id="thrust-slider" type="range" min="0" max="100" value="15" class="thrust-slider w-full">
+                    <button id="btn-ignite" class="px-2.5 py-1 rounded-lg bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500/40 text-orange-300 text-[11px] mono font-semibold transition-all shrink-0">
+                        MAX BOOST
+                    </button>
+                </div>
+            </div>
+
+            <!-- Camera Reset & Auto-Rotate -->
+            <div class="flex items-center justify-between mt-3 pt-2 border-t border-neutral-800/80 text-[11px] text-neutral-400">
+                <button id="btn-reset-cam" class="hover:text-white transition-colors flex items-center gap-1">
+                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                    Reset Reference Angle
+                </button>
+                <button id="btn-pulse" class="hover:text-amber-300 transition-colors mono text-[10px] uppercase tracking-wider">
+                    [ Scan Wave ]
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bottom-Left Subtle Instructions -->
+    <div class="fixed bottom-6 left-6 z-20 hidden md:flex items-center gap-4 text-[11px] mono text-neutral-500 pointer-events-none">
+        <span>LMB: ORBIT</span>
+        <span>•</span>
+        <span>RMB: PAN</span>
+        <span>•</span>
+        <span>SCROLL: SCRUB / ZOOM</span>
+    </div>
+
+    <!-- Bottom-Right Scrubber Pill (Matches Reference Image) -->
+    <div class="fixed bottom-6 right-6 z-30 flex flex-col items-end gap-1.5">
+        <div class="flex items-center gap-2 px-2 text-[10px] mono text-neutral-400">
+            <span>EXPANSION TIMELINE</span>
+            <span id="scrub-percent" class="text-red-400 font-bold">8%</span>
+        </div>
+        <div id="scrubber-track" class="scrubber-pill relative h-11 w-72 sm:w-80 rounded-2xl px-4 flex items-center justify-between select-none">
+            <!-- Red Indicator Line -->
+            <div id="scrubber-indicator" style="left: 10%;"></div>
+            <!-- Tick Marks Injected via JS -->
+            <div id="ticks-wrapper" class="w-full flex items-center justify-between pointer-events-none"></div>
+        </div>
+    </div>
+
+    <script>
+        window.onload = function () {
+            // ==========================================
+            // 1. SCENE, CAMERA & RENDERER SETUP
+            // ==========================================
+            const container = document.getElementById('canvas-container');
+            const scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x212121); // Matches reference charcoal dark background
+
+            const camera = new THREE.PerspectiveCamera(34, window.innerWidth / window.innerHeight, 0.1, 1000);
+            // Position camera to match the diagonal perspective in the reference image
+            const defaultCamPos = { x: 2.2, y: 3.2, z: 16.5 };
+            camera.position.set(defaultCamPos.x, defaultCamPos.y, defaultCamPos.z);
+
+            const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            container.appendChild(renderer.domElement);
+
+            // Orbit Controls for smooth 3D inspection
+            const controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.06;
+            controls.maxDistance = 35;
+            controls.minDistance = 6;
+            controls.target.set(0.2, 0.1, 0);
+
+            // ==========================================
+            // 2. LIGHTING (Warm Peach Top-Left Rim + Dark Studio Fill)
+            // ==========================================
+            const ambientLight = new THREE.AmbientLight(0x383436, 1.35);
+            scene.add(ambientLight);
+
+            // Warm peach/apricot rim directional light from top-left (key characteristic of reference image)
+            const warmRimLight = new THREE.DirectionalLight(0xffbfa3, 1.65);
+            warmRimLight.position.set(-10, 14, 7);
+            warmRimLight.castShadow = true;
+            warmRimLight.shadow.mapSize.width = 2048;
+            warmRimLight.shadow.mapSize.height = 2048;
+            scene.add(warmRimLight);
+
+            // Subtle cool/neutral under-fill from bottom-right
+            const bottomFillLight = new THREE.DirectionalLight(0x4a4e58, 0.75);
+            bottomFillLight.position.set(10, -10, -5);
+            scene.add(bottomFillLight);
+
+            // Back edge rim light
+            const backLight = new THREE.DirectionalLight(0xd9a796, 0.6);
+            backLight.position.set(-4, 6, -12);
+            scene.add(backLight);
+
+            // Internal Thruster Core PointLight (Dynamic with throttle)
+            const thrusterCoreLight = new THREE.PointLight(0xff4500, 0.4, 12);
+            thrusterCoreLight.position.set(3.5, 0, 0);
+            scene.add(thrusterCoreLight);
+
+            // ==========================================
+            // 3. CAD MATERIALS & CEL-EDGE HELPER
+            // ==========================================
+            const matDarkCharcoal = new THREE.MeshStandardMaterial({
+                color: 0x2c2a2b,
+                roughness: 0.48,
+                metalness: 0.35,
+                flatShading: false
+            });
+
+            const matMidGrey = new THREE.MeshStandardMaterial({
+                color: 0x3b3839,
+                roughness: 0.38,
+                metalness: 0.42
+            });
+
+            const matDarkerCore = new THREE.MeshStandardMaterial({
+                color: 0x1e1d1e,
+                roughness: 0.6,
+                metalness: 0.25
+            });
+
+            const matGlossPanel = new THREE.MeshStandardMaterial({
+                color: 0x343132,
+                roughness: 0.22,
+                metalness: 0.55
+            });
+
+            const matEmissiveCore = new THREE.MeshStandardMaterial({
+                color: 0x2a1a17,
+                emissive: 0xff3d00,
+                emissiveIntensity: 0.15,
+                roughness: 0.3
+            });
+
+            const edgeLineMaterial = new THREE.LineBasicMaterial({
+                color: 0x090909,
+                transparent: true,
+                opacity: 0.88
+            });
+
+            // Helper function to create mesh + sharp dark CAD outline edges
+            function createCADPart(geometry, material = matDarkCharcoal, edgeThreshold = 18) {
+                const mesh = new THREE.Mesh(geometry, material);
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+
+                const edgesGeo = new THREE.EdgesGeometry(geometry, edgeThreshold);
+                const lines = new THREE.LineSegments(edgesGeo, edgeLineMaterial);
+                mesh.add(lines);
+
+                return mesh;
+            }
+
+            // ==========================================
+            // 4. PROCEDURAL JET ENGINE THRUSTER ASSEMBLY
+            // ==========================================
+            // Master assembly group tilted to match the exact angle of the user's screenshot
+            const engineMaster = new THREE.Group();
+            engineMaster.rotation.z = 0.26; // ~15 deg upward tilt from left to right
+            engineMaster.rotation.y = -0.32;
+            engineMaster.rotation.x = 0.14;
+            scene.add(engineMaster);
+
+            // Central Internal Spine / Shaft
+            const spineGroup = new THREE.Group();
+            engineMaster.add(spineGroup);
+
+            const centralShaftGeo = new THREE.CylinderGeometry(0.42, 0.42, 9.2, 24);
+            centralShaftGeo.rotateZ(Math.PI / 2);
+            const centralShaft = createCADPart(centralShaftGeo, matDarkerCore);
+            spineGroup.add(centralShaft);
+
+            // Glowing internal plasma core tube (visible when exploded or high throttle)
+            const coreTubeGeo = new THREE.CylinderGeometry(0.55, 0.68, 7.2, 24);
+            coreTubeGeo.rotateZ(Math.PI / 2);
+            const coreTube = new THREE.Mesh(coreTubeGeo, matEmissiveCore);
+            spineGroup.add(coreTube);
+
+            // Store modules for Anime.js timeline control and spinning
+            const modules = {};
+            const spinGroups = [];
+
+            // ------------------------------------------
+            // MODULE 1: Front Ribbed Intake Ring (Far Left)
+            // ------------------------------------------
+            const mod1_Intake = new THREE.Group();
+            mod1_Intake.userData = { baseX: -4.45, explodeX: -7.6, name: "01 // INTAKE SHROUD" };
+            mod1_Intake.position.x = mod1_Intake.userData.baseX;
+            engineMaster.add(mod1_Intake);
+            modules.intake = mod1_Intake;
+
+            // Outer ring via Lathe
+            const intakePoints = [
+                new THREE.Vector2(1.48, -0.45),
+                new THREE.Vector2(1.88, -0.45),
+                new THREE.Vector2(1.94, -0.25),
+                new THREE.Vector2(1.94, 0.35),
+                new THREE.Vector2(1.82, 0.48),
+                new THREE.Vector2(1.52, 0.48),
+                new THREE.Vector2(1.48, 0.25),
+                new THREE.Vector2(1.48, -0.45)
+            ];
+            const intakeRingGeo = new THREE.LatheGeometry(intakePoints, 36);
+            intakeRingGeo.rotateZ(Math.PI / 2);
+            mod1_Intake.add(createCADPart(intakeRingGeo, matMidGrey, 22));
+
+            // Knurled/ribbed ridges around front intake outer perimeter
+            const numIntakeRibs = 48;
+            for (let i = 0; i < numIntakeRibs; i++) {
+                const angle = (i / numIntakeRibs) * Math.PI * 2;
+                const ribGeo = new THREE.BoxGeometry(0.46, 0.05, 0.08);
+                const rib = createCADPart(ribGeo, matDarkCharcoal, 30);
+                rib.position.set(-0.08, Math.cos(angle) * 1.94, Math.sin(angle) * 1.94);
+                rib.rotation.x = -angle;
+                mod1_Intake.add(rib);
+            }
+
+            // ------------------------------------------
+            // MODULE 2: Inner Diffuser Disk & Seal Ring
+            // ------------------------------------------
+            const mod2_Diffuser = new THREE.Group();
+            mod2_Diffuser.userData = { baseX: -3.65, explodeX: -5.85, name: "02 // DIFFUSER PLATE" };
+            mod2_Diffuser.position.x = mod2_Diffuser.userData.baseX;
+            engineMaster.add(mod2_Diffuser);
+            modules.diffuser = mod2_Diffuser;
+
+            const discGeo1 = new THREE.CylinderGeometry(1.55, 1.45, 0.14, 32);
+            discGeo1.rotateZ(Math.PI / 2);
+            mod2_Diffuser.add(createCADPart(discGeo1, matMidGrey));
+
+            const discGeo2 = new THREE.CylinderGeometry(1.32, 1.32, 0.12, 32);
+            discGeo2.rotateZ(Math.PI / 2);
+            const disc2 = createCADPart(discGeo2, matDarkCharcoal);
+            disc2.position.x = 0.16;
+            mod2_Diffuser.add(disc2);
+
+            // Small bolt pins around diffuser
+            for (let i = 0; i < 8; i++) {
+                const a = (i / 8) * Math.PI * 2;
+                const pinGeo = new THREE.CylinderGeometry(0.06, 0.06, 0.35, 8);
+                pinGeo.rotateZ(Math.PI / 2);
+                const pin = createCADPart(pinGeo, matMidGrey);
+                pin.position.set(0.2, Math.cos(a) * 0.75, Math.sin(a) * 0.75);
+                mod2_Diffuser.add(pin);
+            }
+
+            // ------------------------------------------
+            // MODULE 3: Radial Compressor Pods
+            // ------------------------------------------
+            const mod3_Compressor = new THREE.Group();
+            mod3_Compressor.userData = { baseX: -2.65, explodeX: -4.1, name: "03 // COMPRESSOR PODS" };
+            mod3_Compressor.position.x = mod3_Compressor.userData.baseX;
+            engineMaster.add(mod3_Compressor);
+            modules.compressor = mod3_Compressor;
+
+            const compCoreGeo = new THREE.CylinderGeometry(1.15, 1.15, 1.15, 24);
+            compCoreGeo.rotateZ(Math.PI / 2);
+            mod3_Compressor.add(createCADPart(compCoreGeo, matDarkerCore));
+
+            // 8 Radial rectangular mechanical pods with recessed vents
+            const numPods = 8;
+            for (let i = 0; i < numPods; i++) {
+                const angle = (i / numPods) * Math.PI * 2;
+                const podGroup = new THREE.Group();
+                podGroup.rotation.x = angle;
+
+                // Main rectangular block
+                const boxGeo = new THREE.BoxGeometry(1.02, 0.42, 0.56);
+                const box = createCADPart(boxGeo, matMidGrey);
+                box.position.set(0, 1.34, 0);
+                podGroup.add(box);
+
+                // Top detail cap with small slot
+                const capGeo = new THREE.BoxGeometry(0.75, 0.12, 0.36);
+                const cap = createCADPart(capGeo, matDarkCharcoal);
+                cap.position.set(-0.06, 1.58, 0);
+                podGroup.add(cap);
+
+                // Tiny intake notch on top
+                const notchGeo = new THREE.BoxGeometry(0.22, 0.15, 0.14);
+                const notch = createCADPart(notchGeo, matDarkerCore);
+                notch.position.set(0.08, 1.59, 0);
+                podGroup.add(notch);
+
+                mod3_Compressor.add(podGroup);
+            }
+
+            // ------------------------------------------
+            // MODULE 4: Cooling Fins & Stator Disks
+            // ------------------------------------------
+            const mod4_Stators = new THREE.Group();
+            mod4_Stators.userData = { baseX: -1.55, explodeX: -2.25, name: "04 // STATOR COOLING FINS" };
+            mod4_Stators.position.x = mod4_Stators.userData.baseX;
+            engineMaster.add(mod4_Stators);
+            modules.stators = mod4_Stators;
+
+            // 5 closely spaced thin stator rings
+            for (let i = 0; i < 5; i++) {
+                const radius = i % 2 === 0 ? 1.56 : 1.46;
+                const finGeo = new THREE.CylinderGeometry(radius, radius, 0.08, 36);
+                finGeo.rotateZ(Math.PI / 2);
+                const fin = createCADPart(finGeo, i % 2 === 0 ? matMidGrey : matDarkCharcoal);
+                fin.position.x = (i - 2) * 0.15;
+                mod4_Stators.add(fin);
+            }
+
+            // Connecting outer tie-bars across the fins
+            for (let i = 0; i < 6; i++) {
+                const a = (i / 6) * Math.PI * 2;
+                const barGeo = new THREE.BoxGeometry(0.72, 0.14, 0.22);
+                const bar = createCADPart(barGeo, matDarkCharcoal);
+                bar.position.set(0, Math.cos(a) * 1.54, Math.sin(a) * 1.54);
+                bar.rotation.x = -a;
+                mod4_Stators.add(bar);
+            }
+
+            // ------------------------------------------
+            // MODULE 5: High-Pressure Turbine Gears & Rotors (Spins!)
+            // ------------------------------------------
+            const mod5_Turbine = new THREE.Group();
+            mod5_Turbine.userData = { baseX: -0.55, explodeX: -0.5, name: "05 // TURBINE ROTOR GEARS" };
+            mod5_Turbine.position.x = mod5_Turbine.userData.baseX;
+            engineMaster.add(mod5_Turbine);
+            modules.turbine = mod5_Turbine;
+
+            // Rotor Stage A (Counter-rotating)
+            const rotorStageA = new THREE.Group();
+            rotorStageA.position.x = -0.32;
+            mod5_Turbine.add(rotorStageA);
+            spinGroups.push({ group: rotorStageA, speed: 1.4 });
+
+            const rDiskA = new THREE.CylinderGeometry(1.62, 1.62, 0.16, 32);
+            rDiskA.rotateZ(Math.PI / 2);
+            rotorStageA.add(createCADPart(rDiskA, matMidGrey));
+
+            for (let i = 0; i < 24; i++) {
+                const a = (i / 24) * Math.PI * 2;
+                const toothGeo = new THREE.BoxGeometry(0.22, 0.18, 0.15);
+                const tooth = createCADPart(toothGeo, matDarkCharcoal);
+                tooth.position.set(0, Math.cos(a) * 1.68, Math.sin(a) * 1.68);
+                tooth.rotation.x = -a + 0.25;
+                rotorStageA.add(tooth);
+            }
+
+            // Rotor Stage B (Main gear rings right before housing)
+            const rotorStageB = new THREE.Group();
+            rotorStageB.position.x = 0.22;
+            mod5_Turbine.add(rotorStageB);
+            spinGroups.push({ group: rotorStageB, speed: -1.8 });
+
+            for (let r = 0; r < 2; r++) {
+                const subRing = new THREE.Group();
+                subRing.position.x = r * 0.26;
+                const baseCyl = new THREE.CylinderGeometry(1.74, 1.74, 0.14, 36);
+                baseCyl.rotateZ(Math.PI / 2);
+                subRing.add(createCADPart(baseCyl, matMidGrey));
+
+                for (let i = 0; i < 36; i++) {
+                    const a = (i / 36) * Math.PI * 2;
+                    const cogGeo = new THREE.BoxGeometry(0.16, 0.12, 0.1);
+                    const cog = createCADPart(cogGeo, matDarkCharcoal);
+                    cog.position.set(0, Math.cos(a) * 1.82, Math.sin(a) * 1.82);
+                    cog.rotation.x = -a;
+                    subRing.add(cog);
+                }
+                rotorStageB.add(subRing);
+            }
+
+            // ------------------------------------------
+            // MODULE 6: Main Manifold Housing (Center Heavy Casing)
+            // ------------------------------------------
+            const mod6_Housing = new THREE.Group();
+            mod6_Housing.userData = { baseX: 0.85, explodeX: 1.55, name: "06 // MANIFOLD CASING" };
+            mod6_Housing.position.x = mod6_Housing.userData.baseX;
+            engineMaster.add(mod6_Housing);
+            modules.housing = mod6_Housing;
+
+            // Main thick drum
+            const mainDrumGeo = new THREE.CylinderGeometry(2.05, 2.05, 1.55, 36);
+            mainDrumGeo.rotateZ(Math.PI / 2);
+            mod6_Housing.add(createCADPart(mainDrumGeo, matDarkCharcoal, 20));
+
+            // Raised armor plates & characteristic oval pill indentations + ribbed blocks around drum
+            const numHousingPanels = 6;
+            for (let i = 0; i < numHousingPanels; i++) {
+                const a = (i / numHousingPanels) * Math.PI * 2;
+                const panelGroup = new THREE.Group();
+                panelGroup.rotation.x = a;
+
+                if (i % 2 === 0) {
+                    // Smooth curved armor plate with twin oval/pill details (like center of image)
+                    const plateGeo = new THREE.BoxGeometry(1.42, 0.24, 1.25);
+                    const plate = createCADPart(plateGeo, matGlossPanel);
+                    plate.position.set(0, 2.04, 0);
+                    panelGroup.add(plate);
+
+                    // Twin pill/oval blisters
+                    for (let p = -1; p <= 1; p += 2) {
+                        const pillGeo = new THREE.CylinderGeometry(0.16, 0.16, 0.65, 16);
+                        pillGeo.scale(0.55, 1, 1);
+                        const pill = createCADPart(pillGeo, matDarkerCore, 25);
+                        pill.position.set(p * 0.26, 2.15, 0.15);
+                        pill.rotation.z = Math.PI / 2;
+                        panelGroup.add(pill);
+                    }
+                } else {
+                    // Ribbed heat-sink block on alternating faces
+                    const sinkBaseGeo = new THREE.BoxGeometry(1.35, 0.26, 1.1);
+                    const sinkBase = createCADPart(sinkBaseGeo, matMidGrey);
+                    sinkBase.position.set(0, 2.02, 0);
+                    panelGroup.add(sinkBase);
+
+                    for (let r = -4; r <= 4; r++) {
+                        const sRibGeo = new THREE.BoxGeometry(1.25, 0.08, 0.06);
+                        const sRib = createCADPart(sRibGeo, matDarkCharcoal);
+                        sRib.position.set(0, 2.17, r * 0.11);
+                        panelGroup.add(sRib);
+                    }
+                }
+                mod6_Housing.add(panelGroup);
+            }
+
+            // Secondary Collar with Circular Valve Ports right behind housing
+            const collarGroup = new THREE.Group();
+            collarGroup.position.x = 1.05;
+            const collarCylGeo = new THREE.CylinderGeometry(1.78, 1.72, 0.65, 32);
+            collarCylGeo.rotateZ(Math.PI / 2);
+            collarGroup.add(createCADPart(collarCylGeo, matMidGrey));
+
+            // Circular sensor/valve ports sticking out
+            for (let i = 0; i < 8; i++) {
+                const a = (i / 8) * Math.PI * 2;
+                const portGeo = new THREE.CylinderGeometry(0.24, 0.24, 0.25, 20);
+                const port = createCADPart(portGeo, matDarkCharcoal);
+                port.position.set(0.05, Math.cos(a) * 1.78, Math.sin(a) * 1.78);
+                port.rotation.x = a;
+                collarGroup.add(port);
+            }
+            mod6_Housing.add(collarGroup);
+
+            // ------------------------------------------
+            // MODULE 7: Segmented Angled Nozzle Collar
+            // ------------------------------------------
+            const mod7_SegmentedRing = new THREE.Group();
+            mod7_SegmentedRing.userData = { baseX: 2.48, explodeX: 3.65, name: "07 // VECTOR FLAP COLLAR" };
+            mod7_SegmentedRing.position.x = mod7_SegmentedRing.userData.baseX;
+            engineMaster.add(mod7_SegmentedRing);
+            modules.vectorCollar = mod7_SegmentedRing;
+
+            const innerBandGeo = new THREE.CylinderGeometry(1.55, 1.55, 0.68, 28);
+            innerBandGeo.rotateZ(Math.PI / 2);
+            mod7_SegmentedRing.add(createCADPart(innerBandGeo, matDarkerCore));
+
+            // Double row of faceted trapezoidal armor tiles (distinctive chevron-like band in reference)
+            const numTiles = 18;
+            for (let i = 0; i < numTiles; i++) {
+                const a = (i / numTiles) * Math.PI * 2;
+                const tileHolder = new THREE.Group();
+                tileHolder.rotation.x = a;
+
+                // Left & right angled bevel blocks
+                const tileGeo1 = new THREE.BoxGeometry(0.32, 0.24, 0.44);
+                const tile1 = createCADPart(tileGeo1, matMidGrey);
+                tile1.position.set(-0.17, 1.66, 0);
+                tile1.rotation.z = 0.18;
+                tile1.rotation.y = 0.12;
+                tileHolder.add(tile1);
+
+                const tile2 = createCADPart(tileGeo1, matDarkCharcoal);
+                tile2.position.set(0.17, 1.66, 0);
+                tile2.rotation.z = -0.18;
+                tile2.rotation.y = -0.12;
+                tileHolder.add(tile2);
+
+                mod7_SegmentedRing.add(tileHolder);
+            }
+
+            // ------------------------------------------
+            // MODULE 8: Thruster Canister Cluster (8 Bullet-Nose Chambers)
+            // ------------------------------------------
+            const mod8_Canisters = new THREE.Group();
+            mod8_Canisters.userData = { baseX: 3.85, explodeX: 5.7, name: "08 // COMBUSTION CANISTERS" };
+            mod8_Canisters.position.x = mod8_Canisters.userData.baseX;
+            engineMaster.add(mod8_Canisters);
+            modules.canisters = mod8_Canisters;
+
+            // Core mounting octagon
+            const mountCoreGeo = new THREE.CylinderGeometry(1.22, 1.22, 1.65, 16);
+            mountCoreGeo.rotateZ(Math.PI / 2);
+            mod8_Canisters.add(createCADPart(mountCoreGeo, matDarkerCore));
+
+            const numCans = 8;
+            for (let i = 0; i < numCans; i++) {
+                const a = (i / numCans) * Math.PI * 2 + (Math.PI / 8);
+                const canGroup = new THREE.Group();
+                canGroup.rotation.x = a;
+
+                // Rounded bullet nose pointing left (towards front of engine)
+                const noseGeo = new THREE.SphereGeometry(0.34, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2);
+                noseGeo.rotateZ(Math.PI / 2);
+                noseGeo.scale(1.6, 1, 1);
+                const nose = createCADPart(noseGeo, matGlossPanel, 25);
+                nose.position.set(-0.22, 1.42, 0);
+                canGroup.add(nose);
+
+                // Cylindrical canister body
+                const bodyGeo = new THREE.CylinderGeometry(0.34, 0.36, 0.85, 16);
+                bodyGeo.rotateZ(Math.PI / 2);
+                const body = createCADPart(bodyGeo, matMidGrey, 25);
+                body.position.set(0.2, 1.42, 0);
+                canGroup.add(body);
+
+                // Heavy rectangular clamping collar at rear of each canister
+                const clampGeo = new THREE.BoxGeometry(0.55, 0.52, 0.66);
+                const clamp = createCADPart(clampGeo, matDarkCharcoal);
+                clamp.position.set(0.45, 1.45, 0);
+                canGroup.add(clamp);
+
+                mod8_Canisters.add(canGroup);
+            }
+
+            // ------------------------------------------
+            // MODULE 9: Rear Exhaust Retaining Ring & Afterburner Plume
+            // ------------------------------------------
+            const mod9_ExhaustRing = new THREE.Group();
+            mod9_ExhaustRing.userData = { baseX: 4.95, explodeX: 7.75, name: "09 // EXHAUST NOZZLE RING" };
+            mod9_ExhaustRing.position.x = mod9_ExhaustRing.userData.baseX;
+            engineMaster.add(mod9_ExhaustRing);
+            modules.exhaust = mod9_ExhaustRing;
+
+            const exhaustProfile = [
+                new THREE.Vector2(1.55, -0.35),
+                new THREE.Vector2(2.38, -0.35),
+                new THREE.Vector2(2.46, -0.15),
+                new THREE.Vector2(2.46, 0.32),
+                new THREE.Vector2(2.25, 0.45),
+                new THREE.Vector2(1.55, 0.35),
+                new THREE.Vector2(1.55, -0.35)
+            ];
+            const exhaustLatheGeo = new THREE.LatheGeometry(exhaustProfile, 40);
+            exhaustLatheGeo.rotateZ(Math.PI / 2);
+            mod9_ExhaustRing.add(createCADPart(exhaustLatheGeo, matMidGrey, 24));
+
+            // Inner turbine exhaust cone & glowing afterburner plume
+            const coneGeo = new THREE.ConeGeometry(1.15, 2.6, 24, 1, true);
+            coneGeo.rotateZ(-Math.PI / 2);
+            const plumeMat = new THREE.MeshBasicMaterial({
+                color: 0xff5500,
+                transparent: true,
+                opacity: 0.08,
+                side: THREE.DoubleSide,
+                blending: THREE.AdditiveBlending
+            });
+            const afterburnerPlume = new THREE.Mesh(coneGeo, plumeMat);
+            afterburnerPlume.position.x = 1.2;
+            mod9_ExhaustRing.add(afterburnerPlume);
+
+            // Animated Shock-Diamond Rings inside Exhaust
+            const shockRings = [];
+            for (let i = 0; i < 4; i++) {
+                const sGeo = new THREE.RingGeometry(0.35 - i * 0.06, 0.52 - i * 0.06, 24);
+                sGeo.rotateY(Math.PI / 2);
+                const sMat = new THREE.MeshBasicMaterial({
+                    color: 0xffae42,
+                    transparent: true,
+                    opacity: 0.0,
+                    side: THREE.DoubleSide,
+                    blending: THREE.AdditiveBlending
+                });
+                const sRing = new THREE.Mesh(sGeo, sMat);
+                sRing.position.x = 0.5 + i * 0.55;
+                mod9_ExhaustRing.add(sRing);
+                shockRings.push(sRing);
+            }
+
+            // ==========================================
+            // 5. ANIME.JS TIMELINE & SCRUBBER SETUP
+            // ==========================================
+            const ticksWrapper = document.getElementById('ticks-wrapper');
+            const totalTicks = 41;
+            for (let i = 0; i < totalTicks; i++) {
+                const tick = document.createElement('div');
+                tick.className = `tick-line ${i % 5 === 0 ? 'major' : ''}`;
+                ticksWrapper.appendChild(tick);
+            }
+
+            // State object animated by Anime.js timeline
+            const animState = {
+                progress: 0 // 0 = Assembled, 100 = Fully Exploded CAD View
+            };
+
+            const moduleList = Object.values(modules);
+
+            // Build the master Anime.js timeline (controlled via scrubber, wheel, or button)
+            const explodeTimeline = anime.timeline({
+                autoplay: false,
+                duration: 1000,
+                easing: 'easeInOutQuad',
+                update: function(anim) {
+                    updateScrubberUI(anim.progress);
+                }
+            });
+
+            // Animate each module's axial separation and subtle inspection rotation
+            moduleList.forEach((mod, idx) => {
+                explodeTimeline.add({
+                    targets: mod.position,
+                    x: [mod.userData.baseX, mod.userData.explodeX],
+                    duration: 1000,
+                    easing: 'cubicBezier(0.22, 1, 0.36, 1)'
+                }, 0);
+
+                // Subtle staggered rotational twist on explosion for dynamic mechanical feel
+                explodeTimeline.add({
+                    targets: mod.rotation,
+                    x: [0, (idx % 2 === 0 ? 1 : -1) * 0.35],
+                    duration: 1000,
+                    easing: 'easeOutSine'
+                }, 0);
+            });
+
+            // Start at 8% exploded to match the slight separation & red indicator position in the screenshot
+            const initialProgress = 8;
+            explodeTimeline.seek(explodeTimeline.duration * (initialProgress / 100));
+            updateScrubberUI(initialProgress);
+
+            function updateScrubberUI(progressPct) {
+                const clamped = Math.max(0, Math.min(100, progressPct));
+                animState.progress = clamped;
+                const indicator = document.getElementById('scrubber-indicator');
+                const percentLabel = document.getElementById('scrub-percent');
+                const explodeBtnText = document.getElementById('explode-text');
+
+                // Map 0-100% within padded pill track (6% to 94%)
+                const leftPct = 6 + (clamped / 100) * 88;
+                indicator.style.left = `${leftPct}%`;
+                percentLabel.textContent = `${Math.round(clamped)}%`;
+
+                if (clamped > 50) {
+                    explodeBtnText.textContent = "Assemble View";
+                } else {
+                    explodeBtnText.textContent = "Explode View";
+                }
+            }
+
+            // ==========================================
+            // 6. INTERACTIVE SCRUBBER & BUTTON LOGIC
+            // ==========================================
+            const scrubberTrack = document.getElementById('scrubber-track');
+            let isScrubbing = false;
+
+            function handleScrubPointer(clientX) {
+                const rect = scrubberTrack.getBoundingClientRect();
+                const relX = clientX - rect.left;
+                const pct = Math.max(0, Math.min(1, relX / rect.width)) * 100;
+                explodeTimeline.seek(explodeTimeline.duration * (pct / 100));
+                updateScrubberUI(pct);
+            }
+
+            scrubberTrack.addEventListener('mousedown', (e) => {
+                isScrubbing = true;
+                handleScrubPointer(e.clientX);
+            });
+
+            window.addEventListener('mousemove', (e) => {
+                if (!isScrubbing) return;
+                handleScrubPointer(e.clientX);
+            });
+
+            window.addEventListener('mouseup', () => {
+                isScrubbing = false;
+            });
+
+            // Touch support for mobile scrubbing
+            scrubberTrack.addEventListener('touchstart', (e) => {
+                isScrubbing = true;
+                handleScrubPointer(e.touches[0].clientX);
+            }, { passive: true });
+
+            window.addEventListener('touchmove', (e) => {
+                if (!isScrubbing) return;
+                handleScrubPointer(e.touches[0].clientX);
+            }, { passive: true });
+
+            window.addEventListener('touchend', () => {
+                isScrubbing = false;
+            });
+
+            // Wheel scrubbing when hovering the bottom-right pill
+            scrubberTrack.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                const delta = e.deltaY > 0 ? 4 : -4;
+                const nextPct = Math.max(0, Math.min(100, animState.progress + delta));
+                explodeTimeline.seek(explodeTimeline.duration * (nextPct / 100));
+                updateScrubberUI(nextPct);
+            }, { passive: false });
+
+            // Explode / Assemble Toggle Button powered by Anime.js
+            let activeTween = null;
+            document.getElementById('btn-explode').addEventListener('click', () => {
+                if (activeTween) activeTween.pause();
+                const targetPct = animState.progress > 50 ? 0 : 100;
+                const proxy = { p: animState.progress };
+
+                activeTween = anime({
+                    targets: proxy,
+                    p: targetPct,
+                    duration: 1200,
+                    easing: 'easeOutExpo',
+                    update: () => {
+                        explodeTimeline.seek(explodeTimeline.duration * (proxy.p / 100));
+                        updateScrubberUI(proxy.p);
+                    }
+                });
+            });
+
+            // Scan Wave Animation Effect using Anime.js staggering across modules
+            document.getElementById('btn-pulse').addEventListener('click', () => {
+                anime({
+                    targets: moduleList.map(m => m.scale),
+                    x: [1, 1.12, 1],
+                    y: [1, 1.12, 1],
+                    z: [1, 1.12, 1],
+                    delay: anime.stagger(95),
+                    duration: 650,
+                    easing: 'easeInOutSine'
+                });
+            });
+
+            // Reset Camera Angle to match reference image
+            document.getElementById('btn-reset-cam').addEventListener('click', () => {
+                anime({
+                    targets: camera.position,
+                    x: defaultCamPos.x,
+                    y: defaultCamPos.y,
+                    z: defaultCamPos.z,
+                    duration: 900,
+                    easing: 'easeOutCubic'
+                });
+                anime({
+                    targets: controls.target,
+                    x: 0.2,
+                    y: 0.1,
+                    z: 0,
+                    duration: 900,
+                    easing: 'easeOutCubic'
+                });
+            });
+
+            // ==========================================
+            // 7. THRUST / AFTERBURNER SIMULATION (Anime.js)
+            // ==========================================
+            const simParams = {
+                throttle: 15 // 0 to 100
+            };
+
+            const thrustSlider = document.getElementById('thrust-slider');
+            const thrustValLabel = document.getElementById('thrust-val');
+            const rpmReadout = document.getElementById('rpm-readout');
+
+            function updateThrustVisuals(val) {
+                simParams.throttle = val;
+                thrustSlider.value = val;
+                thrustValLabel.textContent = `${Math.round(val)}%`;
+
+                const rpm = Math.round(800 + (val / 100) * 14200);
+                rpmReadout.textContent = `${rpm.toLocaleString()} RPM`;
+
+                // Adjust emissive glow & afterburner plume
+                const norm = val / 100;
+                matEmissiveCore.emissiveIntensity = 0.1 + norm * 2.4;
+                thrusterCoreLight.intensity = 0.2 + norm * 3.5;
+
+                afterburnerPlume.material.opacity = norm * 0.55;
+                afterburnerPlume.scale.set(1 + norm * 1.4, 1 + norm * 0.2, 1 + norm * 0.2);
+
+                shockRings.forEach((ring, idx) => {
+                    ring.material.opacity = Math.max(0, (norm - 0.25) * 0.85 * (1 - idx * 0.18));
+                });
+            }
+
+            thrustSlider.addEventListener('input', (e) => {
+                updateThrustVisuals(parseFloat(e.target.value));
+            });
+
+            let boostActive = false;
+            document.getElementById('btn-ignite').addEventListener('click', (e) => {
+                boostActive = !boostActive;
+                const targetThrust = boostActive ? 100 : 15;
+                e.currentTarget.textContent = boostActive ? "IDLE COOL" : "MAX BOOST";
+
+                anime({
+                    targets: simParams,
+                    throttle: targetThrust,
+                    duration: 1100,
+                    easing: 'easeOutQuart',
+                    update: () => {
+                        updateThrustVisuals(simParams.throttle);
+                    }
+                });
+            });
+
+            // ==========================================
+            // 8. 3D FLOATING TECHNICAL CALLOUT LABELS
+            // ==========================================
+            const labelsContainer = document.getElementById('labels-container');
+            let showLabels = false;
+            const labelItems = [];
+
+            const calloutTargets = [
+                modules.intake,
+                modules.compressor,
+                modules.turbine,
+                modules.housing,
+                modules.canisters,
+                modules.exhaust
+            ];
+
+            calloutTargets.forEach((mod) => {
+                const el = document.createElement('div');
+                el.className = 'callout-label';
+                el.innerHTML = `
+                    <div class="px-2 py-1 rounded bg-neutral-900/90 border border-neutral-700/80 text-[10px] mono text-amber-200 whitespace-nowrap shadow-lg">
+                        ${mod.userData.name}
+                    </div>
+                    <div class="callout-line"></div>
+                    <div class="callout-dot"></div>
+                `;
+                labelsContainer.appendChild(el);
+                labelItems.push({ el, mod });
+            });
+
+            document.getElementById('btn-labels').addEventListener('click', (e) => {
+                showLabels = !showLabels;
+                labelsContainer.style.opacity = showLabels ? '1' : '0';
+                e.currentTarget.classList.toggle('border-amber-500/60', showLabels);
+                e.currentTarget.classList.toggle('text-amber-300', showLabels);
+            });
+
+            function updateCalloutPositions() {
+                if (!showLabels) return;
+                const tempVec = new THREE.Vector3();
+
+                labelItems.forEach(({ el, mod }) => {
+                    mod.getWorldPosition(tempVec);
+                    tempVec.y += 2.15; // Offset above module
+                    tempVec.project(camera);
+
+                    const x = (tempVec.x * 0.5 + 0.5) * window.innerWidth;
+                    const y = (-(tempVec.y * 0.5) + 0.5) * window.innerHeight;
+
+                    el.style.left = `${x}px`;
+                    el.style.top = `${y}px`;
+                });
+            }
+
+            // ==========================================
+            // 9. RENDER & ANIMATION LOOP
+            // ==========================================
+            const clock = new THREE.Clock();
+
+            function animate() {
+                requestAnimationFrame(animate);
+
+                const delta = clock.getDelta();
+                const elapsed = clock.getElapsedTime();
+
+                // Spin internal turbine gears and front diffuser based on throttle
+                const speedFactor = 0.25 + (simParams.throttle / 100) * 6.5;
+                spinGroups.forEach(item => {
+                    item.group.rotation.x += delta * item.speed * speedFactor;
+                });
+
+                // Subtle rotation on diffuser disk
+                modules.diffuser.rotation.x += delta * 0.8 * speedFactor;
+
+                // Subtle high-frequency engine vibration at high throttle
+                if (simParams.throttle > 40) {
+                    const vibe = ((simParams.throttle - 40) / 60) * 0.012;
+                    engineMaster.position.y = Math.sin(elapsed * 55) * vibe;
+                    engineMaster.position.z = Math.cos(elapsed * 60) * vibe;
+                } else {
+                    engineMaster.position.set(0, 0, 0);
+                }
+
+                // Pulse shock rings
+                shockRings.forEach((ring, i) => {
+                    const pulse = 1 + Math.sin(elapsed * 18 - i) * 0.08;
+                    ring.scale.set(pulse, pulse, pulse);
+                });
+
+                controls.update();
+                updateCalloutPositions();
+                renderer.render(scene, camera);
+            }
+
+            // Responsive Resize Handler
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+
+            // Initialize thrust visuals and start loop
+            updateThrustVisuals(15);
+            animate();
+        };
+    </script>
+</body>
+</html>
